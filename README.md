@@ -28,7 +28,26 @@ A secure, self-hosted password manager with client-side encryption built with Ne
 
 ### Installation
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/deena19liebert/password-vault.git
-   cd password-vault
+## Clone the repository
+
+```bash
+git clone https://github.com/deena19liebert/password-vault.git
+cd password-vault
+
+## Environment Variables
+
+Create \`.env.local\`:
+\`\`\`env
+MONGODB_URI=your_mongodb_connection_string
+JWT_SECRET=your_jwt_secret
+JWT_REFRESH_SECRET=your_refresh_secret
+NEXTAUTH_URL=http://localhost:3000
+\`\`\`
+
+## Deployment
+
+This project can be deployed on Vercel, Netlify, or any Node.js hosting platform." > README.md
+
+git add README.md
+git commit -m "Add project README"
+git push
