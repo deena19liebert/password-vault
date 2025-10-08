@@ -6,11 +6,9 @@ import { AuthService } from '../../../../../lib/auth';
 // PUT - Update a vault item
 export async function PUT(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
   try {
-    const { id } = await params; // ← AWAIT the params
-    
     const authHeader = request.headers.get('authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json(
@@ -24,6 +22,7 @@ export async function PUT(
 
     await connectToDatabase();
 
+    const { id } = params;
     const updates = await request.json();
 
     console.log('Updating vault item:', { id, updates });
@@ -71,11 +70,9 @@ export async function PUT(
 // DELETE - Delete a vault item
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
   try {
-    const { id } = await params; // ← AWAIT the params
-    
     const authHeader = request.headers.get('authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json(
@@ -88,6 +85,8 @@ export async function DELETE(
     const tokenPayload = AuthService.verifyAccessToken(token);
 
     await connectToDatabase();
+
+    const { id } = params;
 
     console.log('Deleting vault item:', id);
 

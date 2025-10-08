@@ -35,9 +35,9 @@ interface ApiVaultItem {
   updatedAt: string;
 }
 
-// Proper client-side encryption using Web Crypto API
+// Proper client-side encryption with TypeScript fixes
 class SecureClientEncryption {
-  private static async deriveKey(password: string, salt: Uint8Array): Promise<CryptoKey> {
+  private static async deriveKey(password: string, salt: ArrayBuffer): Promise<CryptoKey> {
     const encoder = new TextEncoder();
     const keyMaterial = await window.crypto.subtle.importKey(
       'raw',
@@ -65,7 +65,7 @@ class SecureClientEncryption {
     try {
       const salt = window.crypto.getRandomValues(new Uint8Array(16));
       const iv = window.crypto.getRandomValues(new Uint8Array(12));
-      const key = await this.deriveKey(password, salt);
+      const key = await this.deriveKey(password, salt.buffer);
       
       const encoder = new TextEncoder();
       const encodedData = encoder.encode(data);
@@ -79,16 +79,15 @@ class SecureClientEncryption {
         encodedData
       );
 
-      // Combine salt + iv + encrypted data
-      const combined = new Uint8Array(salt.length + iv.length + encryptedBuffer.byteLength);
-      combined.set(salt, 0);
-      combined.set(iv, salt.length);
-      combined.set(new Uint8Array(encryptedBuffer), salt.length + iv.length);
+      // Convert to base64 strings for storage
+      const encryptedString = btoa(String.fromCharCode(...new Uint8Array(encryptedBuffer)));
+      const saltString = btoa(String.fromCharCode(...salt));
+      const ivString = btoa(String.fromCharCode(...iv));
 
       return {
-        encrypted: btoa(String.fromCharCode(...combined)),
-        salt: btoa(String.fromCharCode(...salt)),
-        iv: btoa(String.fromCharCode(...iv))
+        encrypted: encryptedString,
+        salt: saltString,
+        iv: ivString
       };
     } catch (error) {
       console.error('Encryption failed:', error);
@@ -98,11 +97,12 @@ class SecureClientEncryption {
 
   static async decrypt(encryptedData: string, password: string, salt: string, iv: string): Promise<string> {
     try {
-      const saltBytes = new Uint8Array(atob(salt).split('').map(char => char.charCodeAt(0)));
-      const ivBytes = new Uint8Array(atob(iv).split('').map(char => char.charCodeAt(0)));
-      const encryptedBytes = new Uint8Array(atob(encryptedData).split('').map(char => char.charCodeAt(0)));
+      // Convert from base64 strings to ArrayBuffers
+      const saltBytes = Uint8Array.from(atob(salt), c => c.charCodeAt(0));
+      const ivBytes = Uint8Array.from(atob(iv), c => c.charCodeAt(0));
+      const encryptedBytes = Uint8Array.from(atob(encryptedData), c => c.charCodeAt(0));
 
-      const key = await this.deriveKey(password, saltBytes);
+      const key = await this.deriveKey(password, saltBytes.buffer);
       
       const decryptedBuffer = await window.crypto.subtle.decrypt(
         {
@@ -129,12 +129,12 @@ class SecureClientEncryption {
   }
 }
 
-// Fallback encryption for browsers that don't support Web Crypto API
+// Fallback encryption for compatibility
 class SimpleClientEncryption {
   static encrypt(data: string, key: string): { encrypted: string; salt: string; iv: string } {
-    // Simple XOR encryption for fallback (not secure for production)
-    const salt = 'default-salt-' + Math.random().toString(36).substring(2);
-    const iv = 'default-iv-' + Math.random().toString(36).substring(2);
+    // Simple XOR encryption for fallback
+    const salt = 'salt-' + Math.random().toString(36).substring(2, 15);
+    const iv = 'iv-' + Math.random().toString(36).substring(2, 15);
     
     let encrypted = '';
     for (let i = 0; i < data.length; i++) {
@@ -164,15 +164,19 @@ class SimpleClientEncryption {
   }
 
   static generateMasterKey(): string {
-    return 'fallback-key-' + Math.random().toString(36).substring(2, 15);
+    return 'key-' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
   }
 }
 
-// API service with token refresh
+// API service
 class ApiService {
   static async makeRequest(url: string, options: RequestInit = {}) {
-    let token = localStorage.getItem('token');
+    const token = localStorage.getItem('token');
     
+    if (!token) {
+      throw new Error('No authentication token');
+    }
+
     const requestOptions: RequestInit = {
       ...options,
       headers: {
@@ -182,47 +186,14 @@ class ApiService {
       },
     };
 
-    let response = await fetch(url, requestOptions);
+    const response = await fetch(url, requestOptions);
     const data = await response.json();
 
-    // If token is expired, try to refresh it
-    if (response.status === 401 && data.error?.includes('token')) {
-      console.log('Token expired, attempting refresh...');
-      
-      const refreshToken = await this.refreshToken();
-      if (refreshToken) {
-        // Retry the request with new token
-        requestOptions.headers = {
-          ...requestOptions.headers,
-          'Authorization': `Bearer ${refreshToken}`,
-        };
-        response = await fetch(url, requestOptions);
-        return await response.json();
-      } else {
-        // Refresh failed, redirect to login
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        window.location.href = '/login';
-        throw new Error('Authentication failed');
-      }
+    if (!response.ok) {
+      throw new Error(data.error || 'API request failed');
     }
 
     return data;
-  }
-
-  static async refreshToken(): Promise<string | null> {
-    try {
-      // In a real app, you'd call a refresh token endpoint
-      // For now, we'll redirect to login
-      console.log('Redirecting to login for token refresh...');
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
-      return null;
-    } catch (error) {
-      console.error('Token refresh failed:', error);
-      return null;
-    }
   }
 }
 
@@ -267,21 +238,11 @@ export default function Dashboard() {
   const loadVaultItems = async () => {
     try {
       const data = await ApiService.makeRequest('/api/vault/items');
-      
-      if (data.success) {
-        setVaultItems(data.data || []);
-        setError('');
-      } else {
-        setError(data.error || 'Failed to load vault items');
-        console.error('API Error:', data.error || 'Unknown error');
-      }
+      setVaultItems(data.data || []);
+      setError('');
     } catch (error: any) {
       console.error('Failed to load vault items:', error);
-      if (error.message === 'Authentication failed') {
-        setError('Session expired. Please login again.');
-      } else {
-        setError('Network error - failed to load vault items');
-      }
+      setError(error.message || 'Failed to load vault items');
     }
   };
 
@@ -327,22 +288,13 @@ export default function Dashboard() {
         })
       });
       
-      if (data.success) {
-        await loadVaultItems();
-        setShowForm(false);
-        setGeneratedPassword('');
-        setError('');
-      } else {
-        setError(data.error || 'Failed to create item');
-        console.error('Create item error:', data.error || 'Unknown error');
-      }
+      await loadVaultItems();
+      setShowForm(false);
+      setGeneratedPassword('');
+      setError('');
     } catch (error: any) {
       console.error('Failed to create vault item:', error);
-      if (error.message === 'Authentication failed') {
-        setError('Session expired. Please login again.');
-      } else {
-        setError('Network error - failed to create item');
-      }
+      setError(error.message || 'Failed to create item');
     }
   };
 
@@ -372,7 +324,7 @@ export default function Dashboard() {
         }
       }
 
-      const data = await ApiService.makeRequest(`/api/vault/items/${editingItem.id}`, {
+      await ApiService.makeRequest(`/api/vault/items/${editingItem.id}`, {
         method: 'PUT',
         body: JSON.stringify({
           title: itemData.title,
@@ -385,21 +337,12 @@ export default function Dashboard() {
         })
       });
       
-      if (data.success) {
-        await loadVaultItems();
-        setEditingItem(null);
-        setError('');
-      } else {
-        setError(data.error || 'Failed to update item');
-        console.error('Update item error:', data.error || 'Unknown error');
-      }
+      await loadVaultItems();
+      setEditingItem(null);
+      setError('');
     } catch (error: any) {
       console.error('Failed to update vault item:', error);
-      if (error.message === 'Authentication failed') {
-        setError('Session expired. Please login again.');
-      } else {
-        setError('Network error - failed to update item');
-      }
+      setError(error.message || 'Failed to update item');
     }
   };
 
@@ -409,24 +352,15 @@ export default function Dashboard() {
     }
 
     try {
-      const data = await ApiService.makeRequest(`/api/vault/items/${itemId}`, {
+      await ApiService.makeRequest(`/api/vault/items/${itemId}`, {
         method: 'DELETE'
       });
       
-      if (data.success) {
-        await loadVaultItems();
-        setError('');
-      } else {
-        setError(data.error || 'Failed to delete item');
-        console.error('Delete item error:', data.error || 'Unknown error');
-      }
+      await loadVaultItems();
+      setError('');
     } catch (error: any) {
       console.error('Failed to delete vault item:', error);
-      if (error.message === 'Authentication failed') {
-        setError('Session expired. Please login again.');
-      } else {
-        setError('Network error - failed to delete item');
-      }
+      setError(error.message || 'Failed to delete item');
     }
   };
 
@@ -447,12 +381,6 @@ export default function Dashboard() {
   const handleUseGeneratedPassword = () => {
     setActiveTab('vault');
     setShowForm(true);
-  };
-
-  const handleLoginRedirect = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    router.push('/login');
   };
 
   const handleLogout = () => {
@@ -588,21 +516,9 @@ export default function Dashboard() {
             padding: '1rem',
             borderRadius: '6px',
             marginBottom: '1rem',
-            border: '1px solid #fcc',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center'
+            border: '1px solid #fcc'
           }}>
-            <span>{error}</span>
-            {error.includes('Session expired') && (
-              <button 
-                onClick={handleLoginRedirect}
-                className="btn btn-primary"
-                style={{ padding: '0.5rem 1rem' }}
-              >
-                Login Again
-              </button>
-            )}
+            {error}
           </div>
         )}
 
@@ -646,11 +562,7 @@ export default function Dashboard() {
                   </button>
                   <button 
                     className="btn btn-secondary"
-                    onClick={() => {
-                      navigator.clipboard.writeText(generatedPassword);
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 3000);
-                    }}
+                    onClick={() => handleCopyPassword(generatedPassword)}
                   >
                     Copy Password
                   </button>

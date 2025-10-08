@@ -16,12 +16,11 @@ export interface TokenPayload {
 }
 
 export class AuthService {
-  // Extend access token to 1 hour for better user experience
   static generateAccessToken(userId: string, email: string): string {
     return jwt.sign(
       { userId, email, type: 'access' },
       JWT_SECRET,
-      { expiresIn: '1h' } // Changed from 15m to 1h
+      { expiresIn: '15m' }
     );
   }
 
@@ -53,6 +52,24 @@ export class AuthService {
       return jwt.decode(token) as TokenPayload;
     } catch {
       return null;
+    }
+  }
+}
+
+export class AuthMiddleware {
+  static verifyAuth(request: Request): TokenPayload {
+    const authHeader = request.headers.get('authorization');
+    
+    if (!authHeader?.startsWith('Bearer ')) {
+      throw new Error('No token provided');
+    }
+
+    const token = authHeader.slice(7);
+    
+    try {
+      return AuthService.verifyAccessToken(token);
+    } catch (error) {
+      throw new Error('Invalid token');
     }
   }
 }
